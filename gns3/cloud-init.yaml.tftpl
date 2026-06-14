@@ -1,0 +1,111 @@
+#cloud-config
+# =============================================================================
+# cloud-init.yaml.tftpl
+#
+# Rendered by Terraform's templatefile() and passed to the container via
+# cloud-init.user-data. Runs once on first boot.
+#
+# Template variables (injected by Terraform):
+#   gns3_port, gns3_user, gns3_password, gns3_version, container_user
+# =============================================================================
+
+package_update: true
+package_upgrade: true
+
+#packages:
+#  - python3
+#  - qemu-kvm
+#  - qemu-utils
+#  - libvirt-clients
+#  - libvirt-daemon-system
+#  - virtinst
+#  #- software-properties-common
+#  - ca-certificates
+#  - curl
+#  - gnupg2
+
+# Create the GNS3 system user before runcmd so group memberships are ready
+users:
+  - name: ${container_user}
+    system: true
+    shell: /bin/bash
+    home: /opt/gns3
+    groups:
+      - kvm
+
+write_files:
+  # Config values from Terraform — sourced by provision.sh
+  - path: /etc/gns3/provision.env
+    permissions: "0600"
+    content: |
+      GNS3_PORT="${gns3_port}"
+      GNS3_USER="${gns3_user}"
+      GNS3_PASSWORD="${gns3_password}"
+      GNS3_VERSION="${gns3_version}"
+      CONTAINER_USER="${container_user}"
+
+  # The provisioning script itself. base64-encoded so no YAML indentation or
+  # special-character escaping issues — cloud-init decodes it on write.
+  - path: /etc/gns3/provision.sh
+    permissions: "0755"
+    encoding: b64
+    content: ${base64encode(provision_script)}
+
+runcmd:
+  - [sh, /etc/gns3/provision.sh]
+
+#runcmd:
+#  # --- ubridge: must be setuid root for raw packet capture ------------------
+#  - chmod +s $(which ubridge)
+#
+#  # --- VPCS: not in Debian repos, download binary ---------------------------
+#  - >
+#    wget -qO /usr/local/bin/vpcs
+#    https://github.com/GNS3/vpcs/releases/latest/download/vpcs
+#    && chmod +x /usr/local/bin/vpcs
+#    || echo "WARN: vpcs download failed, install manually if needed"
+#
+#  # --- GNS3 server via pip into isolated venv -------------------------------
+#  - python3 -m venv /opt/gns3-venv
+#  - /opt/gns3-venv/bin/pip install --quiet --upgrade pip setuptools wheel
+#  - /opt/gns3-venv/bin/pip install --quiet gns3-server
+#
+#  # --- Directory structure --------------------------------------------------
+#  - mkdir -p /opt/gns3/images/IOS /opt/gns3/images/QEMU /opt/gns3/images/IOU
+#  - mkdir -p /opt/gns3/projects /opt/gns3/configs
+#  - chown -R ${container_user}:${container_user} /opt/gns3
+#
+#  # --- GNS3 server config ---------------------------------------------------
+#  - mkdir -p /opt/gns3/.config/GNS3/${gns3_version}
+#  - |
+#    cat > /opt/gns3/.config/GNS3/${gns3_version}/gns3_server.conf << 'EOF'
+#    [Server]
+#    host = 0.0.0.0
+#    port = ${gns3_port}
+#    images_path = /opt/gns3/images
+#    projects_path = /opt/gns3/projects
+#    configs_path = /opt/gns3/configs
+#    report_errors = false
+#    auth = true
+#    user = ${gns3_user}
+#    password = ${gns3_password}
+#
+#    [Dynamips]
+#    enable_sparse_memory_support = true
+#
+#    [VPCS]
+#    vpcs_path = /usr/local/bin/vpcs
+#
+#    [Qemu]
+#    enable_hardware_acceleration = true
+#    require_hardware_acceleration = false
+#    EOF
+#  - chown -R ${container_user}:${container_user} /opt/gns3/.config
+#  # --- systemd service ------------------------------------------------------
+#  - mkdir -p /var/log/gns3
+#  - chown ${container_user}:${container_user} /var/log/gns3
+#  - systemctl daemon-reload
+#  - systemctl enable gns3
+#  - systemctl start gns3
+
+final_message: "GNS3 provisioning complete. Boot took $UPTIME seconds."
