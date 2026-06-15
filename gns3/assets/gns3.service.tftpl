@@ -1,21 +1,18 @@
 [Unit]
 Description=GNS3 Network Simulator Server
-After=network.target network-online.target
 Wants=network-online.target
+After=network.target network-online.target
 
 [Service]
-Type=simple
-User=${container_user}
-Group=${container_user}
-ExecStart=/opt/gns3-venv/bin/gns3server \
-    --config /opt/gns3/.config/GNS3/${gns3_version}/gns3_server.conf \
-    --log /var/log/gns3/gns3.log
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=16384
-AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_SETUID CAP_SETGID
+User=gns3
+Group=gns3
+ExecStart=/opt/gns3/venv/bin/gns3server  \
+            -d \
+            --config /opt/gns3/gns3.conf \
+            --log /opt/gns3/gns3.log
 
 [Install]
 WantedBy=multi-user.target
-# Ho Ho
+
+
+

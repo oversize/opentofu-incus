@@ -1,0 +1,21 @@
+[Server]
+host = 127.0.0.1
+port = 3080
+images_path = /opt/gns3/GNS3/images
+projects_path = /opt/gns3/GNS3/projects
+report_errors = True
+console_start_port_range = 2001
+console_end_port_range = 5000
+udp_start_port_range = 10000
+udp_end_port_range = 20000
+ubridge_path = /usr/local/bin/ubridge
+
+[VPCS]
+vpcs_path = /usr/local/bin/vpcs
+
+[Dynamips]
+allocate_aux_console_ports = False
+mmap_support = True
+dynamips_path = /usr/local/bin/dynamips
+sparse_memory_support = True
+ghost_ios_support = True

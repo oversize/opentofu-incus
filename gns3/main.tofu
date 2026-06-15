@@ -27,7 +27,7 @@ resource "incus_profile" "gns3" {
 
   config = {
     "security.privileged"  = "true"
-    "linux.kernel_modules" = "nf_tables,tun,vhost_net,kvm,${var.kvm_module}"
+    "linux.kernel_modules" = "nf_tables,tun,vhost_net,kvm,kvm_amd"
     "raw.lxc"              = "lxc.apparmor.profile=unconfined"
     "limits.cpu"           = tostring(var.container_cpus)
     "limits.memory"        = var.container_memory
@@ -39,8 +39,8 @@ resource "incus_profile" "gns3" {
     type = "disk"
     properties = {
       path = "/"
-      pool = var.storage_pool
-      size = var.container_disk
+      pool = "default"
+      size = "50GiB"
     }
   }
 
@@ -50,7 +50,7 @@ resource "incus_profile" "gns3" {
     type = "nic"
     properties = {
       name    = "eth0"
-      network = var.network_name
+      network = "incusbr0"
     }
   }
 
@@ -106,11 +106,20 @@ resource "incus_instance" "gns3" {
 
   # Create
   file {
-    content = templatefile("${path.module}/assets/gns3.service.tftpl", {
-      container_user = var.container_user
-      gns3_version   = "2.2"
-    })
+    # Create the systemd service unit
+    content = templatefile("${path.module}/assets/gns3.service.tftpl", {})
     target_path = "/etc/systemd/system/gns3.service"
+    uid         = 0
+    gid         = 0
+    mode        = "0644"
+  }
+
+  file {
+    content = templatefile("${path.module}/assets/gns3.conf.tftpl", {
+      user = var.gns3_user
+      password = var.gns3_password
+    })
+    target_path = "/opt/gns3/gns3.conf"
     uid         = 0
     gid         = 0
     mode        = "0644"
@@ -118,17 +127,8 @@ resource "incus_instance" "gns3" {
 
   config = {
     "boot.autostart" = "true"
-
-    # Pass values from Terraform variables into the cloud-init script so
-    # the provisioning script doesn't need a separate config file.
     "cloud-init.user-data" = templatefile("${path.module}/cloud-init.yaml.tftpl", {
-      gns3_port        = var.gns3_port
-      gns3_user        = var.gns3_user
-      gns3_password    = var.gns3_password
-      gns3_version     = var.gns3_version
-      container_user   = var.container_user
       provision_script = file("${path.module}/assets/provision.sh")
-
     })
   }
 
