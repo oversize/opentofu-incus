@@ -1,13 +1,13 @@
 [Server]
-host = 127.0.0.1
-port = 3080
+host = ${host}
+port = ${port}
 images_path = /opt/gns3/GNS3/images
 projects_path = /opt/gns3/GNS3/projects
 report_errors = True
-console_start_port_range = 2001
-console_end_port_range = 5000
-udp_start_port_range = 10000
-udp_end_port_range = 20000
+console_start_port_range = ${console_start_port_range}
+console_end_port_range = ${console_end_port_range}
+udp_start_port_range = ${udp_start_port_range}
+udp_end_port_range = ${udp_end_port_range}
 ubridge_path = /usr/local/bin/ubridge
 
 [VPCS]

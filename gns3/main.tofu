@@ -1,36 +1,78 @@
+locals {
+  container_name   = "gns3"
+  container_image  = "images:debian/13/cloud"
+  container_cpus   = 4
+  container_memory = "8GiB"
+  host_port        = 3080 # port to be used to the outside
+  gns3_port        = 3080 # Port inside container gns3 listens on
+  service_user = "gns3" # the system user created for the gns3 service
+}
 # ---------------------------------------------------------------------------
-# Profile
+# Projects allow to isolate resources.
 #
-# Defines the container's security and device configuration. Kept as a
-# standalone resource so it can be inspected and modified independently
-# of the instance — useful when iterating on kernel module or device config.
+# A project will by default inherit features from the global default project.
+# If a feature is enabled in belows config map, that means the project
+# will not inherit this from the default and provide its own defition of it
+# if needed.
 #
-# Config keys explained:
-#
-#   security.privileged
-#     Container root maps 1:1 to host root (uid 0). Required for QEMU to
-#     open /dev/kvm and for ubridge to manipulate raw network interfaces.
-#
-#   linux.kernel_modules
-#     Loaded on the HOST by Incus before the container starts. The container
-#     sees them already present via the shared kernel. tun/vhost_net are
-#     needed for QEMU TAP networking; ip_tables/* for GNS3 topology NAT.
-#
-#   raw.lxc lxc.apparmor.profile=unconfined
-#     Disables AppArmor confinement. QEMU and ubridge perform operations
-#     (mmap PROT_EXEC, raw socket creation) the default LXC profile denies.
-#
+# See https://linuxcontainers.org/incus/docs/main/explanation/projects/#
 # ---------------------------------------------------------------------------
-resource "incus_profile" "gns3" {
-  name        = "gns3-profile"
-  description = "GNS3 server — privileged container with /dev/kvm passthrough"
+resource "incus_project" "gns3_project1" {
+  name        = "GNS3-Lab"
+  description = "My GNS3 Lab"
 
+  # Enable
   config = {
+    "features.storage.volumes" = false
+    "features.images"          = false
+    "features.profiles"        = false
+    "features.storage.buckets" = false
+  }
+}
+
+
+# ---------------------------------------------------------------------------
+# Profiles bundle instance cofnigurations. and every project has an empty default
+# profile. So the above project did create a default which i am accessing here
+# through the data block
+# ---------------------------------------------------------------------------
+data "incus_profile" "this" {
+  name = "default"
+}
+
+# ---------------------------------------------------------------------------
+# Instance
+#
+# Uses the /cloud image variant which has cloud-init pre-installed.
+# The provisioning script (gns3-provision.sh) is embedded and passed to
+# cloud-init via the user-data mechanism — it runs once on first boot.
+#
+# cloud-init.user-data is set on the instance (not the profile) because
+# cloud-init runs only on first boot and is instance-specific state.
+# ---------------------------------------------------------------------------
+resource "incus_instance" "gns3" {
+  name        = local.container_name
+  image       = local.container_image
+  description = "A GNS3 Installation to play around with."
+  type        = "container"
+  profiles = [data.incus_profile.this.name]
+  project = incus_project.gns3_project1.name
+
+  # See also https://linuxcontainers.org/incus/docs/main/reference/instance_options/
+  config = {
+    "boot.autostart" = "true"
+    # Priviliged container is required for QEMU to access the /dev/kvm passtrhough
     "security.privileged"  = "true"
+    # Kernel modules are loaded on Host (by incus) and presented to containers
     "linux.kernel_modules" = "nf_tables,tun,vhost_net,kvm,kvm_amd"
+    #  Disable AppArmor confinement. QEMU and ubridge perform operations
+    #  (mmap PROT_EXEC, raw socket creation) the default LXC profile denies
     "raw.lxc"              = "lxc.apparmor.profile=unconfined"
-    "limits.cpu"           = tostring(var.container_cpus)
-    "limits.memory"        = var.container_memory
+    "limits.cpu"           = tostring(local.container_cpus)
+    "limits.memory"        = local.container_memory
+    "cloud-init.user-data" = templatefile("${path.module}/assets/cloud-init.yaml.tftpl", {
+      provision_script = file("${path.module}/assets/provision.sh")
+    })
   }
 
   # Root disk
@@ -44,6 +86,15 @@ resource "incus_profile" "gns3" {
     }
   }
 
+  ########
+  # Instance has two nic devices. The default created bridged network
+  # attached to incusbr0 which allows the incus host to access the container.
+  # As well as a macvlan device that allows the container to have an ip address
+  # from the outside network directly mapped to it. This eliminates the
+  # need of forwarding ports for gns3 because the whole system is available
+  # at that macvlan ip.
+  ########
+
   # Network interface on the Incus bridge
   device {
     name = "eth0"
@@ -51,6 +102,33 @@ resource "incus_profile" "gns3" {
     properties = {
       name    = "eth0"
       network = "incusbr0"
+    }
+  }
+
+  # The macvlan network device needs to get configured through systemd-networkd
+  # and will receive an ip address from the outside dhcp.
+  file {
+    target_path = "/etc/systemd/network/10-lan.network"
+    mode        = "0644"
+    # Owner is set in provivion.sh
+    content = <<-EOF
+[Match]
+Name=lan
+[Network]
+DHCP=yes
+EOF
+  }
+
+  # The maclvlan interface; Uses hardcoded mac address for dhcp server that
+  # the ip address will not randomly change but is the configured one.
+  device {
+    name = "lan"
+    type = "nic"
+    properties = {
+      name = "lan"
+      nictype ="macvlan"
+      parent = "enp7s0"
+      hwaddr = "10:66:6a:12:34:56"
     }
   }
 
@@ -82,66 +160,35 @@ resource "incus_profile" "gns3" {
       path = "/dev/vhost-net"
     }
   }
-}
 
-# ---------------------------------------------------------------------------
-# Instance
-#
-# Uses the /cloud image variant which has cloud-init pre-installed.
-# The provisioning script (gns3-provision.sh) is embedded and passed to
-# cloud-init via the user-data mechanism — it runs once on first boot.
-#
-# cloud-init.user-data is set on the instance (not the profile) because
-# cloud-init runs only on first boot and is instance-specific state.
-# ---------------------------------------------------------------------------
-resource "incus_instance" "gns3" {
-  name        = var.container_name
-  image       = var.container_image
-  description = "A GNS3 Installation to play around with."
-  type        = "container"
 
-  # Only the gns3 profile — it is fully self-contained and includes root +
-  # eth0, so we don't need the default profile.
-  profiles = [incus_profile.gns3.name]
-
-  # Create
+  # Create Files on the instance
   file {
     # Create the systemd service unit
-    content = templatefile("${path.module}/assets/gns3.service.tftpl", {})
+    content = templatefile("${path.module}/assets/gns3.service.tftpl", {
+      service_user = local.service_user
+    })
     target_path = "/etc/systemd/system/gns3.service"
     uid         = 0
     gid         = 0
     mode        = "0644"
   }
 
+  # The gns3 configuration file (provided as --config flag to cli)
+  # Values below are from the example config.
   file {
     content = templatefile("${path.module}/assets/gns3.conf.tftpl", {
-      user = var.gns3_user
-      password = var.gns3_password
+      host = "0.0.0.0"
+      port = 3080
+      console_start_port_range = 4000
+      console_end_port_range = 6000
+      udp_start_port_range = 10000
+      udp_end_port_range = 20000
+
     })
     target_path = "/opt/gns3/gns3.conf"
     uid         = 0
     gid         = 0
     mode        = "0644"
   }
-
-  config = {
-    "boot.autostart" = "true"
-    "cloud-init.user-data" = templatefile("${path.module}/cloud-init.yaml.tftpl", {
-      provision_script = file("${path.module}/assets/provision.sh")
-    })
-  }
-
-  # Port forwarding: odin:host_port → container:gns3_port
-  # This is what the GNS3 GUI on heimdall connects to.
-  device {
-    name = "gns3proxy"
-    type = "proxy"
-    properties = {
-      listen  = "tcp:0.0.0.0:${var.host_port}"
-      connect = "tcp:127.0.0.1:${var.gns3_port}"
-    }
-  }
-
-  depends_on = [incus_profile.gns3]
 }

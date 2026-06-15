@@ -4,8 +4,8 @@ Wants=network-online.target
 After=network.target network-online.target
 
 [Service]
-User=gns3
-Group=gns3
+User=${service_user}
+Group=${service_user}
 ExecStart=/opt/gns3/venv/bin/gns3server  \
             -d \
             --config /opt/gns3/gns3.conf \
